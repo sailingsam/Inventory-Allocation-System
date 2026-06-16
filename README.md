@@ -1,0 +1,192 @@
+# Order Management with FCFS Inventory Allocation
+
+A Django + DRF backend for user auth, role-based authorization, order placement, and a
+**concurrency-safe First-Come-First-Serve (FCFS) inventory allocation engine** driven by
+`order_date`.
+
+> Allocation priority is decided by each order's `order_date` (then `created_at` as a
+> tiebreaker) — **not** by who hit the API first.
+
+---
+
+## Tech stack
+
+- Python 3.12, Django 4.2, Django REST Framework
+- PostgreSQL (row-level locking) — SQLite fallback for zero-setup local dev
+- SimpleJWT (access + refresh + blacklist)
+- drf-spectacular (OpenAPI / Swagger — the API contract)
+- Celery + Redis (bonus: periodic allocation)
+- pytest-django
+
+## Architecture
+
+Clean separation of concerns — business logic lives in `services.py`, never in views:
+
+```
+config/                 # Django project (settings, urls, celery)
+apps/
+  accounts/             # custom email User + Role, JWT auth, role permissions
+  inventory/            # SKU, append-only StockLedger, locked stock service
+  orders/               # Order/OrderLine, create/cancel/fulfill lifecycle
+  allocation/           # FCFS engine (services.py) + AllocationRun audit
+```
+
+- **models** — data + invariants (e.g. non-negative stock check constraints)
+- **services** — transactional business logic (stock mutations, order lifecycle, FCFS engine)
+- **serializers** — validation + representation
+- **views** — thin HTTP layer + permission wiring
+
+---
+
+## Quickstart (Docker)
+
+```bash
+cp .env.example .env                 # defaults are fine for local
+docker compose up --build            # postgres + redis + web + celery worker/beat
+docker compose exec web python manage.py migrate
+docker compose exec web python manage.py seed_demo --fresh
+docker compose exec web python manage.py createsuperuser   # optional, for /admin
+```
+
+App: http://localhost:8000 · Swagger UI: http://localhost:8000/api/schema/swagger-ui/
+
+## Local dev (without Docker)
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+
+# Use Postgres (recommended; concurrency tests need it) or omit DATABASE_URL for SQLite:
+export DATABASE_URL=postgres://oms:oms@localhost:5432/oms
+
+python manage.py migrate
+python manage.py seed_demo --fresh
+python manage.py runserver
+```
+
+## Running tests
+
+```bash
+pytest                       # full suite
+pytest -m postgres           # concurrency tests (require Postgres)
+```
+
+> `select_for_update()` is a no-op on SQLite, so the concurrency tests are marked `postgres`
+> and must be run against PostgreSQL to be meaningful.
+
+---
+
+## Roles & permissions
+
+| Role | Can |
+|------|-----|
+| **Customer** | create own orders, view own orders, cancel own PENDING orders |
+| **Warehouse Operator** | view all orders, run allocation, fulfill orders, manage SKU stock |
+| **Admin** | all of the above + user management |
+
+Unauthenticated requests → `401`; authenticated-but-wrong-role → `403`.
+
+## API surface
+
+| Method | Path | Role |
+|--------|------|------|
+| POST | `/api/auth/register/` | public (creates Customer) |
+| POST | `/api/auth/login/` | public |
+| POST | `/api/auth/refresh/` | public |
+| POST | `/api/auth/logout/` | auth (blacklists refresh) |
+| GET | `/api/me/` | auth |
+| POST/GET | `/api/users/` `…/{id}/` | Admin |
+| GET | `/api/skus/` | any auth |
+| POST | `/api/skus/` | Operator, Admin |
+| PATCH | `/api/skus/{id}/stock/` | Operator, Admin |
+| POST | `/api/orders/` | Customer |
+| GET | `/api/orders/` `…/{id}/` | own (Customer) / all (Operator, Admin) |
+| POST | `/api/orders/{id}/cancel/` | Customer if PENDING, Operator/Admin if ALLOCATED |
+| POST | `/api/orders/{id}/fulfill/` | Operator, Admin |
+| POST | `/api/allocation/run/` | Operator, Admin |
+| GET | `/api/allocation/runs/` `…/{id}/` | Operator, Admin (audit log) |
+
+Full request/response schemas: **Swagger UI** at `/api/schema/swagger-ui/`.
+
+### Example: log in and place an order
+
+```bash
+# login
+curl -s localhost:8000/api/auth/login/ -H 'Content-Type: application/json' \
+  -d '{"email":"customer1@demo.com","password":"DemoPass123"}'
+# -> {"access":"...","refresh":"...","user":{...}}
+
+# place an order (use the access token)
+curl -s localhost:8000/api/orders/ -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' \
+  -d '{"lines":[{"sku":1,"quantity":3}]}'
+```
+
+---
+
+## Demo: the worked example
+
+`python manage.py seed_demo --fresh` creates SKU-A with `available_quantity=12` and ten orders
+dated Apr 1–10 wanting `5, 10, 4, 4, 3, 2, 1, 2, 1, 2`. After `POST /api/allocation/run/`:
+
+| Order | Date | Qty | Outcome | SKU-A available after |
+|-------|------|-----|---------|-----------------------|
+| #1 | Apr 1 | 5 | ALLOCATED | 7 |
+| #2 | Apr 2 | 10 | BACKORDERED | 7 |
+| #3 | Apr 3 | 4 | ALLOCATED | 3 |
+| #4 | Apr 4 | 4 | BACKORDERED | 3 |
+| #5 | Apr 5 | 3 | ALLOCATED | 0 |
+| #6–#10 | Apr 6–10 | … | BACKORDERED | 0 |
+
+The big order (#2) is skipped, but later smaller orders (#3, #5) still get stock — "continue
+past shortages."
+
+---
+
+## Design notes
+
+### Data model
+- `SKU` tracks two non-negative counters: `available_quantity` (free) and `reserved_quantity`
+  (committed to ALLOCATED orders). DB `CheckConstraint`s forbid negative stock.
+- `StockLedger` is **append-only**: every stock movement writes one row (signed deltas,
+  resulting balances, reason, actor, and the causing order). Full audit trail, never mutated.
+- `Order.order_date` is the immutable FCFS priority key. It defaults to `now()` and can only be
+  backdated via seed/admin — the customer API never accepts it (verified by test).
+
+### Allocation strategy — "strict stop" vs "continue past shortages"
+
+<!-- ✍️ CANDIDATE DESIGN NOTE (Stage 5): write this section in your own words once you've
+     implemented the engine. Explain which strategy you chose and WHY, referencing the worked
+     example (order #2 is skipped but #3/#5 still allocate). This is what the follow-up call
+     will probe — own the reasoning. -->
+
+_To be written by the candidate alongside the engine._
+
+### Concurrency & data integrity
+- Every stock mutation runs inside `transaction.atomic()` and takes `select_for_update()` row
+  locks, always acquired in a consistent order (`ORDER BY id`) to avoid deadlocks — in the
+  engine **and** in cancel/fulfill/stock-adjust.
+- An **advisory lock** (`pg_advisory_xact_lock`) ensures only one allocation run is effective at
+  a time; the lock auto-releases at transaction end.
+- Order creation never touches stock (reservation happens only at allocation), so the only
+  oversell vector is concurrent runs — which the advisory lock serializes. No overselling.
+
+### Known trade-offs
+- The whole allocation run is one transaction (simple + strongly consistent) at the cost of no
+  partial progress if it aborts mid-run. A per-order-transaction variant (configurable) would
+  trade that off the other way.
+
+---
+
+## Bonuses included
+- OpenAPI / Swagger schema (drf-spectacular)
+- Celery + Redis periodic allocation task
+- Allocation audit log + summary endpoint
+- Rate limiting on auth endpoints
+- docker-compose for the full stack
+
+## Project assumptions
+- Registration always creates a **Customer**; operators/admins are provisioned by an Admin (or
+  the seed) — operators cannot self-promote.
+- Cancelling an `ALLOCATED` order is an Operator/Admin action (it releases reserved stock);
+  customers may cancel only their own `PENDING` orders.
