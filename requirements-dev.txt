@@ -1,0 +1,9 @@
+-r requirements.txt
+
+# Testing
+pytest~=8.2
+pytest-django~=4.8
+pytest-cov~=5.0
+
+# Lint / format (industry standard)
+ruff~=0.5.0
