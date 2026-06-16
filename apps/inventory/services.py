@@ -22,13 +22,11 @@ class InsufficientStock(Exception):
         super().__init__(message)
 
 
-def move_stock(sku, *, available_delta=0, reserved_delta=0, reason, actor=None, note=""):
+def move_stock(sku, *, available_delta=0, reserved_delta=0, reason, actor=None, order=None, note=""):
     """Apply signed deltas to an ALREADY-LOCKED SKU and append a ledger row.
 
     The caller is responsible for holding the row lock (`select_for_update`) so that concurrent
     callers serialize. Returns the created StockLedger entry.
-
-    (Stage 4 adds an optional `order=` kwarg to link movements to the causing order.)
     """
     new_available = sku.available_quantity + available_delta
     new_reserved = sku.reserved_quantity + reserved_delta
@@ -47,6 +45,7 @@ def move_stock(sku, *, available_delta=0, reserved_delta=0, reason, actor=None, 
         reserved_after=new_reserved,
         reason=reason,
         actor=actor,
+        order=order,
         note=note,
     )
 

@@ -55,8 +55,14 @@ class StockLedger(models.Model):
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
     )
-    # NOTE: an optional FK to orders.Order is added in Stage 4 so allocation/fulfil/cancel
-    # movements link back to the order that caused them.
+    # Links allocation/fulfil/cancel movements back to the order that caused them.
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ledger_entries",
+    )
     note = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
