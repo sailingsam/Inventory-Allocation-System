@@ -9,12 +9,13 @@
 # "New +" -> "Blueprint" and point it at the repo. Render reads this file and
 # provisions all three resources. See the "Deploy to Render" section in README.md.
 #
-# NOTE: service names below decide the public URLs
-#   backend  -> https://oms-backend.onrender.com
-#   frontend -> https://oms-frontend.onrender.com
-# The two cross-service URLs (CORS_ALLOWED_ORIGINS and NEXT_PUBLIC_API_BASE) are
-# hardcoded to these names. If Render appends a suffix because a name is taken,
-# update those two values in the dashboard after the first deploy.
+# NOTE: the bare service names (oms-backend / oms-frontend) were already taken on
+# onrender.com, so Render appended suffixes. The ACTUAL live URLs are:
+#   backend  -> https://oms-backend-d4gb.onrender.com
+#   frontend -> https://oms-frontend-md6k.onrender.com
+# The two cross-service env values below (CORS_ALLOWED_ORIGINS and NEXT_PUBLIC_API_BASE)
+# are pinned to these real URLs. Keep them in sync with the real URLs if services are
+# ever recreated (a new suffix would change them).
 
 databases:
   - name: oms-db
