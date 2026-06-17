@@ -162,6 +162,13 @@ past shortages."
 
 _To be written by the candidate alongside the engine._
 
+### Backorders & retry
+A shortage never causes partial allocation. The order stays outstanding (marked `BACKORDERED`,
+or left `PENDING` if `ALLOCATION_BACKORDER_ON_SHORTAGE=False`) and is **re-checked on every
+subsequent run** — so once stock is replenished it gets filled automatically. Because the queue
+is sorted by `order_date`, an older backordered order keeps its FCFS priority and is served
+before a newer order when limited stock arrives.
+
 ### Concurrency & data integrity
 - Every stock mutation runs inside `transaction.atomic()` and takes `select_for_update()` row
   locks, always acquired in a consistent order (`ORDER BY id`) to avoid deadlocks — in the

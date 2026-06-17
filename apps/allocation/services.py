@@ -57,16 +57,20 @@ def run_allocation(*, actor=None, backorder_on_shortage=None) -> AllocationResul
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_advisory_xact_lock(%s)", [ADVISORY_LOCK_KEY])
 
-        # (2) The FCFS queue: PENDING orders, oldest order_date first (created_at breaks ties).
+        # (2) The FCFS queue: every order that still needs stock — both PENDING and previously
+        #     BACKORDERED — oldest order_date first (created_at breaks ties). Including
+        #     BACKORDERED means an order that couldn't be filled earlier is re-checked on every
+        #     run (e.g. after a restock) and, thanks to the order_date sort, keeps its original
+        #     FCFS priority ahead of newer orders.
         #     We lock these order rows so a concurrent cancel/fulfill on the same order waits
         #     for us (they also lock the order row).
-        pending_orders = (
-            Order.objects.filter(status=OrderStatus.PENDING)
+        outstanding_orders = (
+            Order.objects.filter(status__in=(OrderStatus.PENDING, OrderStatus.BACKORDERED))
             .order_by("order_date", "created_at", "id")
             .select_for_update()
         )
 
-        for order in pending_orders:
+        for order in outstanding_orders:
             result.processed += 1
 
             # Total quantity required per SKU (an order can have multiple lines for one SKU).
@@ -105,11 +109,13 @@ def run_allocation(*, actor=None, backorder_on_shortage=None) -> AllocationResul
                 result.allocated_order_ids.append(order.id)
                 result.detail.append({"order_id": order.id, "outcome": "ALLOCATED"})
             else:
-                # Shortage. We do NOT partially allocate. We also do NOT stop the run — later,
-                # smaller orders may still fit ("continue past shortages").
+                # Shortage. We do NOT partially allocate, and we do NOT stop the run — later,
+                # smaller orders may still fit ("continue past shortages"). The order stays
+                # outstanding and is re-checked on the next run, keeping its FCFS priority.
                 if backorder_on_shortage:
-                    order.status = OrderStatus.BACKORDERED
-                    order.save(update_fields=["status"])
+                    if order.status != OrderStatus.BACKORDERED:
+                        order.status = OrderStatus.BACKORDERED
+                        order.save(update_fields=["status"])
                     result.backordered_order_ids.append(order.id)
                     result.detail.append({"order_id": order.id, "outcome": "BACKORDERED"})
                 else:

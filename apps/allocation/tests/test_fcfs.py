@@ -125,6 +125,46 @@ def test_allocation_writes_ledger_linked_to_order(make_sku, make_order):
     assert entry.available_after == 7
 
 
+def test_backordered_order_is_retried_after_restock(make_sku, make_order):
+    """A backordered order must be re-checked on the next run and filled once stock arrives."""
+    sku = make_sku(available=0)
+    order = make_order([(sku, 5)], april_day=1)
+
+    run_allocation()
+    order.refresh_from_db()
+    assert order.status == OrderStatus.BACKORDERED  # no stock yet
+
+    # Operator restocks, then re-runs allocation.
+    from apps.inventory.services import adjust_stock
+    adjust_stock(sku_id=sku.id, available_delta=5)
+    run_allocation()
+
+    order.refresh_from_db()
+    assert order.status == OrderStatus.ALLOCATED  # auto-filled on retry
+
+
+def test_old_backordered_order_beats_newer_pending_after_restock(make_sku, make_order):
+    """FCFS fairness across runs: an older backordered order is served before a newer order."""
+    sku = make_sku(available=0)
+    old = make_order([(sku, 5)], april_day=1)   # arrives first, gets backordered
+
+    run_allocation()
+    old.refresh_from_db()
+    assert old.status == OrderStatus.BACKORDERED
+
+    # Now a NEWER customer orders, and stock arrives enough for only ONE of them.
+    newer = make_order([(sku, 5)], april_day=2)
+    from apps.inventory.services import adjust_stock
+    adjust_stock(sku_id=sku.id, available_delta=5)
+
+    run_allocation()
+    old.refresh_from_db()
+    newer.refresh_from_db()
+
+    assert old.status == OrderStatus.ALLOCATED      # older backordered wins
+    assert newer.status == OrderStatus.BACKORDERED  # newer waits
+
+
 def test_already_allocated_orders_not_reprocessed(make_sku, make_order):
     sku = make_sku(available=12)
     order = make_order([(sku, 5)], april_day=1)
