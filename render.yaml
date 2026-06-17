@@ -1,0 +1,70 @@
+# Render Blueprint — one-click deploy of the whole stack.
+#
+# Resources:
+#   - oms-db        : managed PostgreSQL (free plan)
+#   - oms-backend   : Django + DRF API (Python web service)
+#   - oms-frontend  : Next.js demo UI (Node web service)
+#
+# Deploy: push this repo to GitHub, then in the Render dashboard choose
+# "New +" -> "Blueprint" and point it at the repo. Render reads this file and
+# provisions all three resources. See the "Deploy to Render" section in README.md.
+#
+# NOTE: service names below decide the public URLs
+#   backend  -> https://oms-backend.onrender.com
+#   frontend -> https://oms-frontend.onrender.com
+# The two cross-service URLs (CORS_ALLOWED_ORIGINS and NEXT_PUBLIC_API_BASE) are
+# hardcoded to these names. If Render appends a suffix because a name is taken,
+# update those two values in the dashboard after the first deploy.
+
+databases:
+  - name: oms-db
+    plan: free
+    databaseName: oms
+    user: oms
+
+services:
+  # ---------------------------------------------------------------- backend
+  - type: web
+    name: oms-backend
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      python manage.py collectstatic --noinput &&
+      python manage.py migrate
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.4"
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true        # Render generates a strong random secret
+      - key: DATABASE_URL
+        fromDatabase:
+          name: oms-db
+          property: connectionString   # internal URL — no external SSL hassle
+      # Allow the deployed frontend to call this API (CORS).
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://oms-frontend.onrender.com
+      # Celery is not deployed on Render (no free background worker); allocation is
+      # triggered via POST /api/allocation/run/. These keep settings happy.
+      - key: CELERY_BROKER_URL
+        value: redis://localhost:6379/0
+      - key: ALLOCATION_BACKORDER_ON_SHORTAGE
+        value: "True"
+
+  # ---------------------------------------------------------------- frontend
+  - type: web
+    name: oms-frontend
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start -- -p $PORT
+    envVars:
+      # Inlined at BUILD time by Next.js — must point at the backend before build runs.
+      - key: NEXT_PUBLIC_API_BASE
+        value: https://oms-backend.onrender.com/api
