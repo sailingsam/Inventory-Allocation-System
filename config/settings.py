@@ -16,9 +16,9 @@ env = environ.Env(
     DEBUG=(bool, False),
     SECRET_KEY=(str, "dev-insecure-secret-key-change-me"),
     ALLOWED_HOSTS=(list, ["*"]),
-    # Database: defaults to local SQLite so the project runs with zero setup;
-    # docker-compose / production override this with a Postgres URL.
-    DATABASE_URL=(str, f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
+    # Database: PostgreSQL is required (the FCFS engine relies on real row-level + advisory
+    # locking). Default points at the docker-compose Postgres; override via DATABASE_URL.
+    DATABASE_URL=(str, "postgres://oms:oms@localhost:5432/oms"),
     CORS_ALLOWED_ORIGINS=(list, ["http://localhost:3000"]),
     CELERY_BROKER_URL=(str, "redis://localhost:6379/0"),
     ALLOCATION_BACKORDER_ON_SHORTAGE=(bool, True),

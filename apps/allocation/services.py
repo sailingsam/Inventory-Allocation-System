@@ -53,9 +53,8 @@ def run_allocation(*, actor=None, backorder_on_shortage=None) -> AllocationResul
     with transaction.atomic():
         # (1) Only one allocation run effective at a time. The advisory lock is held until this
         #     transaction ends, so a second concurrent run blocks here until we finish.
-        if connection.vendor == "postgresql":
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT pg_advisory_xact_lock(%s)", [ADVISORY_LOCK_KEY])
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", [ADVISORY_LOCK_KEY])
 
         # (2) The FCFS queue: every order that still needs stock — both PENDING and previously
         #     BACKORDERED — oldest order_date first (created_at breaks ties). Including

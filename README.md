@@ -12,7 +12,7 @@ A Django + DRF backend for user auth, role-based authorization, order placement,
 ## Tech stack
 
 - Python 3.12, Django 4.2, Django REST Framework
-- PostgreSQL (row-level locking) — SQLite fallback for zero-setup local dev
+- PostgreSQL (required — the FCFS engine relies on real row-level + advisory locking)
 - SimpleJWT (access + refresh + blacklist)
 - drf-spectacular (OpenAPI / Swagger — the API contract)
 - Celery + Redis (bonus: periodic allocation)
@@ -56,7 +56,7 @@ App: http://localhost:8000 · Swagger UI: http://localhost:8000/api/schema/swagg
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
-# Use Postgres (recommended; concurrency tests need it) or omit DATABASE_URL for SQLite:
+# PostgreSQL is required. Start one (e.g. via docker compose up -d db) and point to it:
 export DATABASE_URL=postgres://oms:oms@localhost:5432/oms
 
 python manage.py migrate
@@ -67,12 +67,9 @@ python manage.py runserver
 ## Running tests
 
 ```bash
-pytest                       # full suite
-pytest -m postgres           # concurrency tests (require Postgres)
+pytest                       # full suite (needs a running Postgres)
+pytest -m postgres           # just the threaded concurrency tests
 ```
-
-> `select_for_update()` is a no-op on SQLite, so the concurrency tests are marked `postgres`
-> and must be run against PostgreSQL to be meaningful.
 
 ---
 
