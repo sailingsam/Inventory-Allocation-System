@@ -1,5 +1,6 @@
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
@@ -8,7 +9,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import User
+from .models import Role, User
 from .permissions import IsAdmin
 from .serializers import (
     AdminUserSerializer,
@@ -72,3 +73,21 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().order_by("id")
     serializer_class = AdminUserSerializer
     permission_classes = [IsAdmin]
+
+    def perform_update(self, serializer):
+        # Guard against self-lockout: an admin may not deactivate or demote their own
+        # account (the only changes that would revoke their own access mid-session).
+        instance = serializer.instance
+        if instance.id == self.request.user.id:
+            new_role = serializer.validated_data.get("role", instance.role)
+            new_active = serializer.validated_data.get("is_active", instance.is_active)
+            if new_role != Role.ADMIN or not new_active:
+                raise ValidationError(
+                    "You cannot change your own role or deactivate your own account."
+                )
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.id == self.request.user.id:
+            raise ValidationError("You cannot delete your own account.")
+        instance.delete()

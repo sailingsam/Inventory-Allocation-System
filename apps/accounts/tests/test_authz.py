@@ -46,3 +46,38 @@ def test_superuser_passes_role_gate(api, make_user):
     su = make_user(email="root@example.com", role=Role.ADMIN, is_superuser=True, is_staff=True)
     api.force_authenticate(user=su)
     assert api.get("/api/users/").status_code == 200
+
+
+def test_admin_cannot_deactivate_self(auth_client):
+    """Self-lockout guard: an admin may not deactivate their own account."""
+    api, admin = auth_client(role=Role.ADMIN)
+    resp = api.patch(f"/api/users/{admin.id}/", {"is_active": False}, format="json")
+    assert resp.status_code == 400
+    admin.refresh_from_db()
+    assert admin.is_active is True
+
+
+def test_admin_cannot_demote_self(auth_client):
+    """Self-lockout guard: an admin may not change their own role away from ADMIN."""
+    api, admin = auth_client(role=Role.ADMIN)
+    resp = api.patch(f"/api/users/{admin.id}/", {"role": Role.CUSTOMER}, format="json")
+    assert resp.status_code == 400
+    admin.refresh_from_db()
+    assert admin.role == Role.ADMIN
+
+
+def test_admin_cannot_delete_self(auth_client):
+    api, admin = auth_client(role=Role.ADMIN)
+    resp = api.delete(f"/api/users/{admin.id}/")
+    assert resp.status_code == 400
+    assert User.objects.filter(id=admin.id).exists()
+
+
+def test_admin_can_deactivate_another_user(auth_client, make_user):
+    """The guard is self-only — admins can still manage other accounts."""
+    api, _ = auth_client(role=Role.ADMIN)
+    other = make_user(email="op2@example.com", role=Role.WAREHOUSE_OPERATOR)
+    resp = api.patch(f"/api/users/{other.id}/", {"is_active": False}, format="json")
+    assert resp.status_code == 200
+    other.refresh_from_db()
+    assert other.is_active is False
