@@ -52,9 +52,12 @@ services:
         fromDatabase:
           name: oms-db
           property: connectionString   # internal URL — no external SSL hassle
-      # Allow the deployed frontend to call this API (CORS).
+      # Allow the deployed frontend (and local dev) to call this API (CORS).
+      # NOTE: these are the ACTUAL deployed URLs (Render appended -md6k/-d4gb suffixes
+      # because the bare names were taken). Keep them in sync with the real service URLs
+      # so a blueprint re-sync on push doesn't revert CORS to a wrong value.
       - key: CORS_ALLOWED_ORIGINS
-        value: https://oms-frontend.onrender.com
+        value: https://oms-frontend-md6k.onrender.com,http://localhost:3000
       # Celery is not deployed on Render (no free background worker); allocation is
       # triggered via POST /api/allocation/run/. These keep settings happy.
       - key: CELERY_BROKER_URL
@@ -77,5 +80,7 @@ services:
     startCommand: npm run start -- -p $PORT
     envVars:
       # Inlined at BUILD time by Next.js — must point at the backend before build runs.
+      # This is the ACTUAL deployed backend URL (Render appended the -d4gb suffix). Keep it
+      # in sync so a blueprint re-sync on push doesn't revert it to a wrong value.
       - key: NEXT_PUBLIC_API_BASE
-        value: https://oms-backend.onrender.com/api
+        value: https://oms-backend-d4gb.onrender.com/api
