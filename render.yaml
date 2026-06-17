@@ -33,11 +33,13 @@ services:
       pip install -r requirements.txt &&
       python manage.py collectstatic --noinput &&
       python manage.py migrate &&
-      python manage.py seed_demo
-    # NOTE: `seed_demo` (without --fresh) is idempotent — it get_or_creates users/SKUs and
-    # skips order creation if orders already exist. Safe to run on every build; it seeds the
-    # worked-example data on the first deploy and is a no-op afterwards. (Never add --fresh
-    # here — that would wipe data on every deploy.)
+      python manage.py seed_demo $SEED_ARGS
+    # NOTE: `seed_demo` (no args) is idempotent — it get_or_creates users/SKUs and skips
+    # order creation if orders already exist. Safe on every build; seeds the worked-example
+    # data on first deploy, no-op afterwards.
+    # To RESET the demo to a clean worked-example state: set SEED_ARGS="--fresh" in the
+    # dashboard, deploy once (it wipes + reseeds), then set SEED_ARGS back to "" so future
+    # deploys don't wipe data.
     startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
@@ -59,6 +61,10 @@ services:
         value: redis://localhost:6379/0
       - key: ALLOCATION_BACKORDER_ON_SHORTAGE
         value: "True"
+      # Extra args for the build-step seed. Empty = idempotent seed (no wipe). Set to
+      # "--fresh" in the dashboard for a one-time reset, then set it back to "".
+      - key: SEED_ARGS
+        value: ""
 
   # ---------------------------------------------------------------- frontend
   - type: web
