@@ -64,14 +64,14 @@ def _quantities_by_sku(order):
 def cancel_order(*, order, actor):
     """Cancel an order.
 
-    - PENDING  -> simply mark CANCELLED (no stock was reserved).
-    - ALLOCATED -> release reserved stock back to available, then mark CANCELLED.
-    Any other status is a conflict.
+    - PENDING / BACKORDERED -> simply mark CANCELLED (no stock was reserved).
+    - ALLOCATED             -> release reserved stock back to available, then mark CANCELLED.
+    Any other status (FULFILLED / already CANCELLED) is a conflict.
     """
     order = Order.objects.select_for_update().get(pk=order.pk)
 
-    if order.status == OrderStatus.PENDING:
-        pass  # nothing reserved
+    if order.status in (OrderStatus.PENDING, OrderStatus.BACKORDERED):
+        pass  # nothing reserved (a backordered order is just waiting for stock)
     elif order.status == OrderStatus.ALLOCATED:
         skus = _locked_skus_for(order)
         for sku_id, qty in _quantities_by_sku(order).items():

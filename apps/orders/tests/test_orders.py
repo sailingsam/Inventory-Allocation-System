@@ -99,6 +99,15 @@ def test_operator_cancel_allocated_releases_stock(client_for, operator, allocate
     assert allocated_order.ledger_entries.filter(reason=StockReason.CANCELLATION).exists()
 
 
+def test_customer_can_cancel_own_backordered_order(client_for, customer, sku):
+    """A backordered order is just waiting for stock — the customer may cancel it."""
+    order = Order.objects.create(customer=customer, status=OrderStatus.BACKORDERED)
+    resp = client_for(customer).post(f"/api/orders/{order.id}/cancel/")
+    assert resp.status_code == 200
+    order.refresh_from_db()
+    assert order.status == OrderStatus.CANCELLED
+
+
 def test_cannot_cancel_fulfilled_order(client_for, operator, allocated_order):
     allocated_order.status = OrderStatus.FULFILLED
     allocated_order.save(update_fields=["status"])

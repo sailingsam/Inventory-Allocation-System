@@ -195,5 +195,7 @@ before a newer order when limited stock arrives.
 ## Project assumptions
 - Registration always creates a **Customer**; operators/admins are provisioned by an Admin (or
   the seed) — operators cannot self-promote.
-- Cancelling an `ALLOCATED` order is an Operator/Admin action (it releases reserved stock);
-  customers may cancel only their own `PENDING` orders.
+- Cancelling an `ALLOCATED` order is an Operator/Admin action (it releases reserved stock).
+- Customers may cancel their own `PENDING` **or** `BACKORDERED` orders. (The brief mentions only
+  PENDING; we extend this to BACKORDERED because such an order holds no reserved stock and is
+  merely waiting — a customer should be able to cancel it.)
