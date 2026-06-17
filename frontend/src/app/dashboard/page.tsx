@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { AllocationRun, Order, Paginated, SKU } from "@/lib/types";
+import type { AdminUser, AllocationRun, Order, Paginated, Role, SKU } from "@/lib/types";
 
 const STATUS_STYLES: Record<string, string> = {
   PENDING: "bg-slate-100 text-slate-600",
@@ -218,7 +218,178 @@ export default function Dashboard() {
           </div>
         </section>
       </main>
+
+      {user.role === "ADMIN" && <UsersPanel setMsg={setMsg} selfId={user.id} />}
     </div>
+  );
+}
+
+const ROLES: { value: Role; label: string }[] = [
+  { value: "CUSTOMER", label: "Customer" },
+  { value: "WAREHOUSE_OPERATOR", label: "Operator" },
+  { value: "ADMIN", label: "Admin" },
+];
+
+const ROLE_STYLES: Record<Role, string> = {
+  CUSTOMER: "text-slate-600",
+  WAREHOUSE_OPERATOR: "text-blue-700",
+  ADMIN: "text-purple-700",
+};
+
+function UsersPanel({ setMsg, selfId }: { setMsg: (m: string) => void; selfId: number }) {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("DemoPass123");
+  const [role, setRole] = useState<Role>("WAREHOUSE_OPERATOR");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const res = await api<Paginated<AdminUser>>("/users/");
+    if (res.ok) setUsers(res.data.results);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function createUser() {
+    if (!email || !password) return;
+    setBusy(true);
+    const res = await api("/users/", {
+      method: "POST",
+      body: JSON.stringify({ email, password, role }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      setMsg(`User ${email} created as ${role}.`);
+      setEmail("");
+      setPassword("DemoPass123");
+      await load();
+    } else {
+      setMsg("Could not create user (email may already exist, or password too weak).");
+    }
+  }
+
+  async function patch(u: AdminUser, body: Record<string, unknown>, ok: string) {
+    const res = await api(`/users/${u.id}/`, { method: "PATCH", body: JSON.stringify(body) });
+    setMsg(res.ok ? ok : "Could not update user.");
+    await load();
+  }
+
+  return (
+    <section className="px-6 pb-6">
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        Users (admin)
+      </h2>
+      <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+        {/* create form */}
+        <div className="flex flex-wrap items-end gap-2 border-b border-slate-100 p-4">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="new.user@demo.com"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          />
+          <input
+            type="text"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="password"
+            className="w-40 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          />
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as Role)}
+            className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+          >
+            {ROLES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={createUser}
+            disabled={busy || !email || !password}
+            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          >
+            + Create user
+          </button>
+        </div>
+
+        {/* table */}
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-400">
+            <tr>
+              <th className="px-3 py-2">#</th>
+              <th className="px-3 py-2">Email</th>
+              <th className="px-3 py-2">Role</th>
+              <th className="px-3 py-2">Active</th>
+              <th className="px-3 py-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => {
+              const isSelf = u.id === selfId;
+              return (
+                <tr key={u.id} className="border-t border-slate-100">
+                  <td className="px-3 py-2">{u.id}</td>
+                  <td className="px-3 py-2">
+                    {u.email}
+                    {isSelf && <span className="ml-1 text-xs text-slate-400">(you)</span>}
+                  </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={u.role}
+                      disabled={isSelf}
+                      title={isSelf ? "You cannot change your own role" : undefined}
+                      onChange={(e) => patch(u, { role: e.target.value }, `Role updated for ${u.email}.`)}
+                      className={`rounded-md border border-slate-200 bg-white px-1.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${ROLE_STYLES[u.role]}`}
+                    >
+                      {ROLES.map((r) => (
+                        <option key={r.value} value={r.value}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-3 py-2">
+                    {u.is_active ? (
+                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                        active
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500">
+                        inactive
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {isSelf ? (
+                      <span className="text-xs text-slate-300">—</span>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          patch(
+                            u,
+                            { is_active: !u.is_active },
+                            `User ${u.email} ${u.is_active ? "deactivated" : "activated"}.`,
+                          )
+                        }
+                        className="text-xs text-slate-600 hover:underline"
+                      >
+                        {u.is_active ? "deactivate" : "activate"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

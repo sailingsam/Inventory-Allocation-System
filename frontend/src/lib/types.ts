@@ -6,6 +6,14 @@ export interface User {
   role: Role;
 }
 
+export interface AdminUser {
+  id: number;
+  email: string;
+  role: Role;
+  is_active: boolean;
+  date_joined: string;
+}
+
 export interface SKU {
   id: number;
   code: string;
