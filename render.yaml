@@ -32,7 +32,12 @@ services:
     buildCommand: >-
       pip install -r requirements.txt &&
       python manage.py collectstatic --noinput &&
-      python manage.py migrate
+      python manage.py migrate &&
+      python manage.py seed_demo
+    # NOTE: `seed_demo` (without --fresh) is idempotent — it get_or_creates users/SKUs and
+    # skips order creation if orders already exist. Safe to run on every build; it seeds the
+    # worked-example data on the first deploy and is a no-op afterwards. (Never add --fresh
+    # here — that would wipe data on every deploy.)
     startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
