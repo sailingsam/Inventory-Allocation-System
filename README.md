@@ -150,14 +150,35 @@ past shortages."
 - `Order.order_date` is the immutable FCFS priority key. It defaults to `now()` and can only be
   backdated via seed/admin — the customer API never accepts it (verified by test).
 
-### Allocation strategy — "strict stop" vs "continue past shortages"
+### Allocation strategy — "continue past shortages" (chosen) vs "strict stop"
 
-<!-- ✍️ CANDIDATE DESIGN NOTE (Stage 5): write this section in your own words once you've
-     implemented the engine. Explain which strategy you chose and WHY, referencing the worked
-     example (order #2 is skipped but #3/#5 still allocate). This is what the follow-up call
-     will probe — own the reasoning. -->
+When an order in the FCFS queue cannot be fully satisfied, there are two reasonable behaviours:
 
-_To be written by the candidate alongside the engine._
+- **Strict stop** — halt the whole run at the first order that doesn't fit. Every later order
+  stays unallocated even if stock remains.
+- **Continue past shortages** (what I chose) — skip the order that doesn't fit (mark it
+  `BACKORDERED`) and keep going, so later, smaller orders can still use the remaining stock.
+
+I chose **continue past shortages** because:
+
+1. **It maximises stock utilisation.** Leftover stock isn't wasted just because one large order
+   couldn't be filled. In the worked example SKU-A=12: order #2 (qty 10) can't fit in the
+   remaining 7, but #3 (qty 4) and #5 (qty 3) still allocate — 12 units fully used.
+2. **It avoids head-of-line blocking.** Under strict stop, a single oversized or
+   never-fulfillable order would block *every* subsequent order indefinitely — bad for
+   throughput and for every other customer.
+3. **FCFS fairness is still preserved.** Orders are always processed in `order_date` (then
+   `created_at`) order; "continue" only means one unfillable order doesn't halt the queue. And
+   a backordered order keeps its priority — it is re-checked on every run and, once enough
+   stock arrives, is filled before newer orders.
+
+All-or-nothing per order is still strictly enforced — an order never gets a partial allocation.
+
+**Trade-off:** a very large order can keep being skipped while smaller, later orders get stock
+first. That is the intended behaviour for FCFS-by-availability, and the backordered order never
+loses its place in line. If a stricter "nobody after a shortage gets stock until that order is
+filled" policy were ever required, it could be added behind a setting without touching the rest
+of the engine.
 
 ### Backorders & retry
 A shortage never causes partial allocation. The order stays outstanding (marked `BACKORDERED`,
